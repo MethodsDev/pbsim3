@@ -1,6 +1,8 @@
 #ifdef HAVE_CONFIG_H
 #include "../config.h"
 #endif
+#include <algorithm>
+#include <string>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,7 +20,7 @@
 #define TRUE 1
 #define FALSE 0
 #define BUF_SIZE 10240
-#define REF_ID_LEN_MAX 128
+#define REF_ID_LEN_MAX 2048
 #define TRANS_ID_LEN_MAX 128
 #define REF_SEQ_NUM_MAX 9999
 #define REF_SEQ_LEN_MAX 1000000000
@@ -68,7 +70,7 @@ struct sim_t {
   double res_len_mean, res_len_sd; 
   long res_sub_num, res_ins_num, res_del_num;
   double res_sub_rate, res_ins_rate, res_del_rate;
-  char *prefix, *outfile_ref, *outfile_fq, *outfile_maf, *outfile_sam;
+  char *prefix, *outfile_ref, *outfile_fq, *outfile_maf, *outfile_sam, *outfile_name_map;
   char *profile_id, *profile_fq, *profile_stats;
   char *id_prefix;
   int pass_num, res_pass_num;
@@ -180,7 +182,7 @@ struct errhmm_t {
 // Global variances                    //
 /////////////////////////////////////////
 
-FILE *fp_filtered, *fp_stats, *fp_fq, *fp_sam, *fp_maf;
+FILE *fp_filtered, *fp_stats, *fp_fq, *fp_sam, *fp_maf, *fp_name_map;
 struct sim_t sim;
 struct sample_t sample;
 struct genome_t genome;
@@ -715,6 +717,7 @@ int main (int argc, char** argv) {
           fprintf(stderr, "ERROR: Cannot open output file: %s\n", sim.outfile_sam);
           return FAILED;
         }
+
         fprintf(fp_sam, "@HD\tVN:1.5\tSO:unknown\tpb:3.0.7\n");
         fprintf(fp_sam, "@RG\tID:ffffffff\tPL:PACBIO\tDS:READTYPE=SUBREAD;Ipd:CodecV1=ip;PulseWidth:CodecV1=pw;BINDINGKIT=101-789-500;SEQUENCINGKIT=101-826-100;BASECALLERVERSION=5.0.0;FRAMERATEHZ=100.000000\tPU:%s%ld\tPM:SEQUELII\n", sim.id_prefix, genome.num);
       }
@@ -813,21 +816,18 @@ int main (int argc, char** argv) {
 
     init_sim_res();
 
-    if (sim.pass_num == 1) {
-      sprintf(sim.outfile_fq, "%s.fastq", sim.prefix);
-      if ((fp_fq = fopen(sim.outfile_fq, "w")) == NULL) {
-        fprintf(stderr, "ERROR: Cannot open output file: %s\n", sim.outfile_fq);
-        return FAILED;
-      }
-    } else {
-      sprintf(sim.outfile_sam, "%s.sam", sim.prefix);
-      if ((fp_sam = fopen(sim.outfile_sam, "w")) == NULL) {
-        fprintf(stderr, "ERROR: Cannot open output file: %s\n", sim.outfile_sam);
-        return FAILED;
-      }
-      fprintf(fp_sam, "@HD\tVN:1.5\tSO:unknown\tpb:3.0.7\n");
-      fprintf(fp_sam, "@RG\tID:ffffffff\tPL:PACBIO\tDS:READTYPE=SUBREAD;Ipd:CodecV1=ip;PulseWidth:CodecV1=pw;BINDINGKIT=101-789-500;SEQUENCINGKIT=101-826-100;BASECALLERVERSION=5.0.0;FRAMERATEHZ=100.000000\tPU:%s\tPM:SEQUELII\n", sim.id_prefix);
+    sprintf(sim.outfile_sam, "%s.sam", sim.prefix);
+    if ((fp_sam = fopen(sim.outfile_sam, "w")) == NULL) {
+      fprintf(stderr, "ERROR: Cannot open output file: %s\n", sim.outfile_sam);
+      return FAILED;
     }
+    fprintf(fp_sam, "@HD\tVN:1.5\tSO:unknown\tpb:3.0.7\n");
+    fprintf(fp_sam, "@RG\tID:ffffffff\tPL:PACBIO\tDS:READTYPE=SUBREAD;Ipd:CodecV1=ip;PulseWidth:CodecV1=pw;BINDINGKIT=101-789-500;SEQUENCINGKIT=101-826-100;BASECALLERVERSION=5.0.0;FRAMERATEHZ=100.000000\tPU:%s\tPM:SEQUELII\n", sim.id_prefix);
+    sprintf(sim.outfile_name_map, "%s.name_map", sim.prefix);
+    if ((fp_name_map = fopen(sim.outfile_name_map, "w")) == NULL) {
+       fprintf(stderr, "ERROR: Cannot open output file: %s\n", sim.outfile_name_map);
+       return FAILED;
+    }  
 
     sprintf(sim.outfile_maf, "%s.maf", sim.prefix);
     if ((fp_maf = fopen(sim.outfile_maf, "w")) == NULL) {
@@ -847,11 +847,8 @@ int main (int argc, char** argv) {
 
     print_simulation_stats();
 
-    if (sim.pass_num == 1) {
-      fclose(fp_fq);
-    } else {
-      fclose(fp_sam);
-    }
+    fclose(fp_sam);
+    fclose(fp_name_map);
     fclose(fp_maf);
   }
 
@@ -1498,6 +1495,11 @@ int set_sim_param() {
   }
 
   if ((sim.outfile_sam = (char *)malloc(strlen(sim.prefix) + 10)) == 0) {
+    fprintf(stderr, "ERROR: Cannot allocate memory.\n");
+    return FAILED;
+  }
+
+  if ((sim.outfile_name_map = (char *)malloc(strlen(sim.prefix) + 20)) == 0) {
     fprintf(stderr, "ERROR: Cannot allocate memory.\n");
     return FAILED;
   }
@@ -4815,7 +4817,7 @@ int simulate_by_errhmm_templ() {
   long start_wk, end_wk;
   long index, index2, pre_index;
   long accuracy_min, accuracy_max;
-  char id[128];
+  char id[196];
   int digit_num1[4], digit_num2[4], digit_num[4];
   int acc_tmp, rate_mag;
   int qeval;
@@ -5252,23 +5254,19 @@ int simulate_by_errhmm_templ() {
         }
         mut.new_qc[len] = '\0';
 
-        if (sim.pass_num == 1) {
-          sprintf(id, "%s_%ld", sim.id_prefix, sim.res_num);
-          fprintf(fp_fq, "@%s\n%s\n+%s\n%s\n", id, mut.read_seq, id, mut.new_qc);
-        } else {
-          sprintf(id, "%s/%ld/%ld", sim.id_prefix, sim.res_num, h);
-          fprintf(fp_sam, "%s\t4\t*\t0\t255\t*\t*\t0\t0\t%s\t%s", id, mut.read_seq, mut.new_qc);
-          fprintf(fp_sam, "\tcx:i:3\tip:B:C");
-          for (i=0; i<len; i++) {
-            fprintf(fp_sam, ",9");
-          }
-          fprintf(fp_sam, "\tnp:i:1\tpw:B:C");
-          for (i=0; i<len; i++) {
-            fprintf(fp_sam, ",9");
-          }
-          qeval = len - 1;
-          fprintf(fp_sam, "\tqs:i:0\tqe:i:%ld\trq:f:%f\tsn:B:f,10.0,10.0,10.0,10.0\tzm:i:%ld\tRG:Z:ffffffff\n", qeval, sim.accuracy_mean, sim.res_num);
+        sprintf(id, "%s/%ld/%ld", sim.id_prefix, sim.res_num, h);
+        fprintf(fp_name_map, "%s\t%s\n", id, templ.id);
+        fprintf(fp_sam, "%s\t4\t*\t0\t255\t*\t*\t0\t0\t%s\t%s", id, mut.read_seq, mut.new_qc);
+        fprintf(fp_sam, "\tcx:i:3\tip:B:C");
+        for (i=0; i<len; i++) {
+          fprintf(fp_sam, ",9");
         }
+        fprintf(fp_sam, "\tnp:i:1\tpw:B:C");
+        for (i=0; i<len; i++) {
+          fprintf(fp_sam, ",9");
+        }
+        qeval = len - 1;
+        fprintf(fp_sam, "\tqs:i:0\tqe:i:%ld\trq:f:%f\tsn:B:f,10.0,10.0,10.0,10.0\tzm:i:%ld\tRG:Z:ffffffff\n", qeval, sim.accuracy_mean, sim.res_num);
 
         digit_num1[0] = 3;
         digit_num2[0] = 1 + count_digit(sim.res_num);
