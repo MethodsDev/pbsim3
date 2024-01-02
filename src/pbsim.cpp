@@ -5263,7 +5263,7 @@ int simulate_by_errhmm_templ() {
         fprintf(fp_name_map, "%s\t%s\n", id, templ.id);
         
 	if (sim.pass_num == 1) {
-          fprintf(fp_fq, "@%s\n%s\n+%s\n%s\n", id, mut.read_seq, mut.new_qc);
+          fprintf(fp_fq, "@%s\n%s\n+\n%s\n", id, mut.read_seq, mut.new_qc);
         } else {
 	  fprintf(fp_sam, "%s\t4\t*\t0\t255\t*\t*\t0\t0\t%s\t%s", id, mut.read_seq, mut.new_qc);
           fprintf(fp_sam, "\tcx:i:3\tip:B:C");
