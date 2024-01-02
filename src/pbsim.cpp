@@ -816,13 +816,22 @@ int main (int argc, char** argv) {
 
     init_sim_res();
 
-    sprintf(sim.outfile_sam, "%s.sam", sim.prefix);
-    if ((fp_sam = fopen(sim.outfile_sam, "w")) == NULL) {
-      fprintf(stderr, "ERROR: Cannot open output file: %s\n", sim.outfile_sam);
-      return FAILED;
+    if (sim.pass_num == 1) {
+      sprintf(sim.outfile_fq, "%s.fastq", sim.prefix);
+      if ((fp_fq = fopen(sim.outfile_fq, "w")) == NULL) {
+        fprintf(stderr, "ERROR: Cannot open output file: %s\n", sim.outfile_fq);
+	return FAILED;
+      }
+    } else {
+      sprintf(sim.outfile_sam, "%s.sam", sim.prefix);
+      if ((fp_sam = fopen(sim.outfile_sam, "w")) == NULL) {
+        fprintf(stderr, "ERROR: Cannot open output file: %s\n", sim.outfile_sam);
+        return FAILED;
+      }
+      fprintf(fp_sam, "@HD\tVN:1.5\tSO:unknown\tpb:3.0.7\n");
+      fprintf(fp_sam, "@RG\tID:ffffffff\tPL:PACBIO\tDS:READTYPE=SUBREAD;Ipd:CodecV1=ip;PulseWidth:CodecV1=pw;BINDINGKIT=101-789-500;SEQUENCINGKIT=101-826-100;BASECALLERVERSION=5.0.0;FRAMERATEHZ=100.000000\tPU:%s\tPM:SEQUELII\n", sim.id_prefix);
     }
-    fprintf(fp_sam, "@HD\tVN:1.5\tSO:unknown\tpb:3.0.7\n");
-    fprintf(fp_sam, "@RG\tID:ffffffff\tPL:PACBIO\tDS:READTYPE=SUBREAD;Ipd:CodecV1=ip;PulseWidth:CodecV1=pw;BINDINGKIT=101-789-500;SEQUENCINGKIT=101-826-100;BASECALLERVERSION=5.0.0;FRAMERATEHZ=100.000000\tPU:%s\tPM:SEQUELII\n", sim.id_prefix);
+    
     sprintf(sim.outfile_name_map, "%s.name_map", sim.prefix);
     if ((fp_name_map = fopen(sim.outfile_name_map, "w")) == NULL) {
        fprintf(stderr, "ERROR: Cannot open output file: %s\n", sim.outfile_name_map);
@@ -847,7 +856,11 @@ int main (int argc, char** argv) {
 
     print_simulation_stats();
 
-    fclose(fp_sam);
+    if (sim.pass_num == 1) {
+      fclose(fp_fq);
+    } else {
+      fclose(fp_sam);
+    }
     fclose(fp_name_map);
     fclose(fp_maf);
   }
@@ -5248,18 +5261,22 @@ int simulate_by_errhmm_templ() {
 
         sprintf(id, "%s/%ld/%ld", sim.id_prefix, sim.res_num, h);
         fprintf(fp_name_map, "%s\t%s\n", id, templ.id);
-        fprintf(fp_sam, "%s\t4\t*\t0\t255\t*\t*\t0\t0\t%s\t%s", id, mut.read_seq, mut.new_qc);
-        fprintf(fp_sam, "\tcx:i:3\tip:B:C");
-        for (i=0; i<len; i++) {
-          fprintf(fp_sam, ",9");
+        
+	if (sim.pass_num == 1) {
+          fprintf(fp_fq, "@%s\n%s\n+\n%s\n", id, mut.read_seq, mut.new_qc);
+        } else {
+	  fprintf(fp_sam, "%s\t4\t*\t0\t255\t*\t*\t0\t0\t%s\t%s", id, mut.read_seq, mut.new_qc);
+          fprintf(fp_sam, "\tcx:i:3\tip:B:C");
+          for (i=0; i<len; i++) {
+            fprintf(fp_sam, ",9");
+          }
+          fprintf(fp_sam, "\tnp:i:1\tpw:B:C");
+          for (i=0; i<len; i++) {
+            fprintf(fp_sam, ",9");
+          }
+          qeval = len - 1;
+          fprintf(fp_sam, "\tqs:i:0\tqe:i:%ld\trq:f:%f\tsn:B:f,10.0,10.0,10.0,10.0\tzm:i:%ld\tRG:Z:ffffffff\n", qeval, sim.accuracy_mean, sim.res_num);
         }
-        fprintf(fp_sam, "\tnp:i:1\tpw:B:C");
-        for (i=0; i<len; i++) {
-          fprintf(fp_sam, ",9");
-        }
-        qeval = len - 1;
-        fprintf(fp_sam, "\tqs:i:0\tqe:i:%ld\trq:f:%f\tsn:B:f,10.0,10.0,10.0,10.0\tzm:i:%ld\tRG:Z:ffffffff\n", qeval, sim.accuracy_mean, sim.res_num);
-
         digit_num1[0] = 3;
         digit_num2[0] = 1 + count_digit(sim.res_num);
         digit_num[0] = (digit_num1[0] >= digit_num2[0]) ? digit_num1[0] : digit_num2[0];
